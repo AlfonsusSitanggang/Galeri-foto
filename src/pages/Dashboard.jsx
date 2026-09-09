@@ -1,98 +1,142 @@
+import { useState, useEffect } from "react";
 import { useAuth } from "../hooks/useAuth";
+import { getUserPhotos } from "../services/photoService";
+import PhotoGrid from "../components/PhotoGrid";
 
 const Dashboard = () => {
   const { user, logout } = useAuth();
 
+  const [photos, setPhotos] = useState([]);
+  const [loadingPhotos, setLoadingPhotos] = useState(true);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    let isMounted = true;
+
+    const fetchPhotos = async () => {
+      // Pastikan user.uid sudah tersedia dari useAuth
+      if (!user?.uid) return;
+
+      setLoadingPhotos(true);
+      setError("");
+
+      try {
+        console.log("🔍 [Dashboard] Meminta foto untuk user UID:", user.uid);
+        const data = await getUserPhotos(user.uid);
+        console.log("📸 [Dashboard] Hasil data foto yang diterima dari Firestore:", data);
+        if (isMounted) {
+          setPhotos(data);
+        }
+      } catch (err) {
+        console.error("Gagal mengambil foto:", err);
+        if (isMounted) {
+          if (err.code === "permission-denied") {
+            setError("Akses ditolak. Periksa aturan keamanan (Security Rules) Firestore Anda.");
+          } else {
+            setError("Gagal memuat galeri foto. Silakan muat ulang halaman.");
+          }
+        }
+      } finally {
+        if (isMounted) {
+          setLoadingPhotos(false);
+        }
+      }
+    };
+
+    fetchPhotos();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [user?.uid]);
+
   const handleLogout = async () => {
     try {
       await logout();
-    } catch (error) {
-      console.error("Gagal logout:", error);
+    } catch (err) {
+      console.error("Gagal logout:", err);
     }
   };
 
   return (
-    <div style={styles.container}>
-      <header style={styles.header}>
-        <h1 style={styles.logo}>Personal Photo Gallery</h1>
-        <div style={styles.userSection}>
-          <span style={styles.greeting}>
-            Halo, <strong>{user?.displayName || user?.email}</strong>
+    <div className="min-h-screen bg-slate-900 text-slate-100 font-sans">
+      {/* 1. Header Navigasi */}
+      <header className="flex justify-between items-center px-6 py-4 bg-slate-800/80 backdrop-blur border-b border-slate-700/60 sticky top-0 z-10">
+        <h1 className="text-xl font-bold text-blue-400 m-0">
+          Personal Photo Gallery
+        </h1>
+        <div className="flex items-center gap-4">
+          <span className="text-sm text-slate-300">
+            Halo, <strong className="text-white">{user?.displayName || user?.email}</strong>
           </span>
-          <button onClick={handleLogout} style={styles.logoutBtn}>
+          <button
+            onClick={handleLogout}
+            className="px-4 py-1.5 bg-red-600 hover:bg-red-500 text-white rounded-lg text-sm font-semibold transition cursor-pointer"
+          >
             Logout
           </button>
         </div>
       </header>
 
-      <main style={styles.content}>
-        <div style={styles.welcomeCard}>
-          <h2>Dashboard Galeri</h2>
-          <p style={styles.desc}>
-            Selamat datang di area privat galeri foto Anda. Fitur autentikasi telah aktif dan rute ini dilindungi oleh <code>ProtectedRoute</code>.
-          </p>
+      {/* 2. Konten Utama Galeri */}
+      <main className="max-w-6xl mx-auto p-6 md:p-8">
+        <div className="flex justify-between items-center mb-8">
+          <div>
+            <h2 className="text-2xl font-bold text-slate-100">Koleksi Foto Saya</h2>
+            <p className="text-sm text-slate-400 mt-1">
+              Semua foto pribadi yang terhubung dengan akun Anda
+            </p>
+          </div>
         </div>
+
+        {/* State A: Sedang Mengambil Data dari Firestore */}
+        {loadingPhotos && (
+          <div className="flex flex-col items-center justify-center py-20">
+            <div className="w-10 h-10 border-4 border-slate-700 border-t-blue-500 rounded-full animate-spin" />
+            <p className="mt-4 text-sm text-slate-400">Memuat galeri foto Anda...</p>
+          </div>
+        )}
+
+        {/* State B: Error Firestore */}
+        {!loadingPhotos && error && (
+          <div className="bg-red-500/10 border border-red-500/30 rounded-xl p-5 text-center text-red-400 text-sm">
+            <p className="font-semibold mb-1">Terjadi Kesalahan</p>
+            <p>{error}</p>
+          </div>
+        )}
+
+        {/* State C: Empty State (User belum memiliki foto) */}
+        {!loadingPhotos && !error && photos.length === 0 && (
+          <div className="bg-slate-800/50 border border-slate-700/60 rounded-2xl p-12 text-center max-w-md mx-auto my-8 flex flex-col items-center">
+            <div className="w-16 h-16 bg-slate-700/50 rounded-full flex items-center justify-center mb-4 text-slate-400">
+              <svg
+                className="w-8 h-8"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth="1.5"
+                  d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"
+                />
+              </svg>
+            </div>
+            <h3 className="text-lg font-semibold text-slate-200">Belum Ada Foto</h3>
+            <p className="text-sm text-slate-400 mt-2 leading-relaxed">
+              Galeri Anda masih kosong. Foto yang Anda unggah nantinya akan langsung tampil di halaman ini.
+            </p>
+          </div>
+        )}
+
+        {/* State D: Data Foto Berhasil Dimuat */}
+        {!loadingPhotos && !error && photos.length > 0 && (
+          <PhotoGrid photos={photos} />
+        )}
       </main>
     </div>
   );
-};
-
-const styles = {
-  container: {
-    minHeight: "100vh",
-    backgroundColor: "#0f172a",
-    color: "#f8fafc",
-    fontFamily: "system-ui, -apple-system, sans-serif",
-  },
-  header: {
-    display: "flex",
-    justifyContent: "space-between",
-    alignItems: "center",
-    padding: "16px 32px",
-    backgroundColor: "#1e293b",
-    borderBottom: "1px solid #334155",
-  },
-  logo: {
-    fontSize: "20px",
-    fontWeight: "700",
-    margin: 0,
-    color: "#60a5fa",
-  },
-  userSection: {
-    display: "flex",
-    alignItems: "center",
-    gap: "16px",
-  },
-  greeting: {
-    fontSize: "14px",
-    color: "#cbd5e1",
-  },
-  logoutBtn: {
-    padding: "8px 16px",
-    backgroundColor: "#ef4444",
-    color: "#ffffff",
-    border: "none",
-    borderRadius: "6px",
-    fontSize: "13px",
-    fontWeight: "600",
-    cursor: "pointer",
-  },
-  content: {
-    padding: "32px",
-    maxWidth: "1000px",
-    margin: "0 auto",
-  },
-  welcomeCard: {
-    backgroundColor: "#1e293b",
-    borderRadius: "12px",
-    padding: "24px",
-    border: "1px solid #334155",
-  },
-  desc: {
-    color: "#94a3b8",
-    marginTop: "8px",
-    lineHeight: "1.6",
-  },
 };
 
 export default Dashboard;
