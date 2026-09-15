@@ -1,6 +1,7 @@
 import { initializeApp } from "firebase/app";
 import { getAuth } from "firebase/auth";
 import { getFirestore } from "firebase/firestore";
+import { getStorage } from "firebase/storage";
 
 // Konfigurasi Firebase Anda yang diambil dari environment variables (.env)
 // Di Vite, prefix VITE_ digunakan untuk mengekspos variabel ke client-side.
@@ -28,5 +29,8 @@ export const auth = getAuth(app);
 // Explicit database ID '(default)' memastikan SDK mengarah ke database yang benar
 export const db = getFirestore(app, "(default)");
 
-// Ekspor app jika nantinya butuh layanan lain (misal Storage)
+// Inisialisasi layanan Firebase Storage
+export const storage = getStorage(app);
+
+// Ekspor app jika nantinya butuh layanan lain
 export default app;
