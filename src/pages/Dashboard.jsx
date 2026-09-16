@@ -1,54 +1,120 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useAuth } from "../hooks/useAuth";
 import { getUserPhotos } from "../services/photoService";
 import PhotoGrid from "../components/PhotoGrid";
+import UploadModal from "../components/UploadModal";
 
 const Dashboard = () => {
   const { user, logout } = useAuth();
 
   const [photos, setPhotos] = useState([]);
+
+  /**
+   * true → sedang melakukan initial fetch (pertama kali atau saat uid berubah).
+   * Digunakan untuk menampilkan skeleton/spinner penuh di area galeri.
+   */
   const [loadingPhotos, setLoadingPhotos] = useState(true);
+
+  /**
+   * true → sedang me-refresh gallery setelah upload berhasil.
+   * Dipisah dari loadingPhotos agar galeri lama tidak hilang saat refresh.
+   */
+  const [isRefreshing, setIsRefreshing] = useState(false);
+
+  /** Error saat initial load atau refresh gallery */
   const [error, setError] = useState("");
 
-  useEffect(() => {
-    let isMounted = true;
+  /**
+   * Pesan khusus kasus upload berhasil TAPI refresh gallery gagal.
+   * Upload tidak boleh dilaporkan sebagai gagal dalam kasus ini.
+   */
+  const [galleryRefreshError, setGalleryRefreshError] = useState("");
 
-    const fetchPhotos = async () => {
-      // Pastikan user.uid sudah tersedia dari useAuth
+  const [isModalOpen, setIsModalOpen] = useState(false);
+
+  // ── Fungsi ambil foto dari Firestore ──────────────────────────────────────
+
+  /**
+   * Mengambil semua foto user dari Firestore dan memperbarui state photos.
+   *
+   * @param {"initial"|"refresh"} mode
+   *   "initial" → tampilkan spinner penuh (loadingPhotos).
+   *   "refresh" → tampilkan indikator refresh kecil (isRefreshing),
+   *               pertahankan data lama jika gagal.
+   */
+  const fetchPhotos = useCallback(
+    async (mode = "initial") => {
       if (!user?.uid) return;
 
-      setLoadingPhotos(true);
-      setError("");
+      if (mode === "initial") {
+        setLoadingPhotos(true);
+        setError("");
+      } else {
+        setIsRefreshing(true);
+        setGalleryRefreshError("");
+      }
 
       try {
-        console.log("🔍 [Dashboard] Meminta foto untuk user UID:", user.uid);
+        console.log(`🔍 [Dashboard] Fetch foto (${mode}) untuk uid:`, user.uid);
         const data = await getUserPhotos(user.uid);
-        console.log("📸 [Dashboard] Hasil data foto yang diterima dari Firestore:", data);
-        if (isMounted) {
-          setPhotos(data);
-        }
+        console.log("📸 [Dashboard] Data foto diterima:", data);
+        setPhotos(data);
       } catch (err) {
-        console.error("Gagal mengambil foto:", err);
-        if (isMounted) {
+        console.error("[Dashboard] Gagal mengambil foto:", err);
+
+        if (mode === "initial") {
+          // Error initial load → tampilkan di area galeri
           if (err.code === "permission-denied") {
             setError("Akses ditolak. Periksa aturan keamanan (Security Rules) Firestore Anda.");
           } else {
             setError("Gagal memuat galeri foto. Silakan muat ulang halaman.");
           }
+        } else {
+          // Error refresh → foto lama TETAP ditampilkan, tampilkan banner khusus
+          setGalleryRefreshError(
+            "Foto berhasil diupload, tetapi gallery gagal diperbarui. Silakan muat ulang halaman."
+          );
         }
       } finally {
-        if (isMounted) {
+        if (mode === "initial") {
           setLoadingPhotos(false);
+        } else {
+          setIsRefreshing(false);
         }
       }
+    },
+    [user?.uid]
+  );
+
+  // ── Initial fetch saat uid tersedia / berubah ──────────────────────────────
+
+  useEffect(() => {
+    let isMounted = true;
+
+    const run = async () => {
+      if (!user?.uid) return;
+      if (!isMounted) return;
+      await fetchPhotos("initial");
     };
 
-    fetchPhotos();
+    run();
 
     return () => {
       isMounted = false;
     };
-  }, [user?.uid]);
+  }, [user?.uid, fetchPhotos]);
+
+  // ── Callback setelah upload berhasil ──────────────────────────────────────
+
+  /**
+   * Dipanggil oleh UploadModal setelah uploadMultiplePhotos() berhasil penuh.
+   * Dashboard mengambil ulang data gallery tanpa full page reload.
+   */
+  const handleUploadSuccess = useCallback(() => {
+    fetchPhotos("refresh");
+  }, [fetchPhotos]);
+
+  // ── Logout ────────────────────────────────────────────────────────────────
 
   const handleLogout = async () => {
     try {
@@ -57,6 +123,8 @@ const Dashboard = () => {
       console.error("Gagal logout:", err);
     }
   };
+
+  // ── Render ────────────────────────────────────────────────────────────────
 
   return (
     <div className="min-h-screen bg-slate-900 text-slate-100 font-sans">
@@ -80,6 +148,7 @@ const Dashboard = () => {
 
       {/* 2. Konten Utama Galeri */}
       <main className="max-w-6xl mx-auto p-6 md:p-8">
+        {/* Judul seksi + tombol Upload */}
         <div className="flex justify-between items-center mb-8">
           <div>
             <h2 className="text-2xl font-bold text-slate-100">Koleksi Foto Saya</h2>
@@ -87,9 +156,38 @@ const Dashboard = () => {
               Semua foto pribadi yang terhubung dengan akun Anda
             </p>
           </div>
+          <button
+            id="dashboard-upload-btn"
+            onClick={() => setIsModalOpen(true)}
+            className="flex items-center gap-2 px-4 py-2.5 bg-blue-600 hover:bg-blue-500 text-white text-sm font-semibold rounded-xl transition shadow-lg shadow-blue-500/20"
+          >
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 4v16m8-8H4" />
+            </svg>
+            Upload Foto
+          </button>
         </div>
 
-        {/* State A: Sedang Mengambil Data dari Firestore */}
+        {/* Banner: refresh gallery gagal (upload tetap berhasil) */}
+        {galleryRefreshError && (
+          <div
+            role="alert"
+            className="mb-6 flex items-start gap-3 bg-amber-500/10 border border-amber-500/30 rounded-xl px-4 py-3 text-sm text-amber-300"
+          >
+            <span className="mt-0.5 flex-shrink-0 font-bold">!</span>
+            <span>{galleryRefreshError}</span>
+          </div>
+        )}
+
+        {/* Indikator refreshing kecil (tidak menyembunyikan galeri) */}
+        {isRefreshing && (
+          <div className="flex items-center gap-2 mb-4 text-xs text-slate-400">
+            <div className="w-3.5 h-3.5 border-2 border-slate-600 border-t-blue-400 rounded-full animate-spin" />
+            <span>Memperbarui galeri...</span>
+          </div>
+        )}
+
+        {/* State A: Initial loading */}
         {loadingPhotos && (
           <div className="flex flex-col items-center justify-center py-20">
             <div className="w-10 h-10 border-4 border-slate-700 border-t-blue-500 rounded-full animate-spin" />
@@ -97,7 +195,7 @@ const Dashboard = () => {
           </div>
         )}
 
-        {/* State B: Error Firestore */}
+        {/* State B: Error saat initial load */}
         {!loadingPhotos && error && (
           <div className="bg-red-500/10 border border-red-500/30 rounded-xl p-5 text-center text-red-400 text-sm">
             <p className="font-semibold mb-1">Terjadi Kesalahan</p>
@@ -105,16 +203,11 @@ const Dashboard = () => {
           </div>
         )}
 
-        {/* State C: Empty State (User belum memiliki foto) */}
+        {/* State C: Empty State */}
         {!loadingPhotos && !error && photos.length === 0 && (
           <div className="bg-slate-800/50 border border-slate-700/60 rounded-2xl p-12 text-center max-w-md mx-auto my-8 flex flex-col items-center">
             <div className="w-16 h-16 bg-slate-700/50 rounded-full flex items-center justify-center mb-4 text-slate-400">
-              <svg
-                className="w-8 h-8"
-                fill="none"
-                stroke="currentColor"
-                viewBox="0 0 24 24"
-              >
+              <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path
                   strokeLinecap="round"
                   strokeLinejoin="round"
@@ -130,11 +223,18 @@ const Dashboard = () => {
           </div>
         )}
 
-        {/* State D: Data Foto Berhasil Dimuat */}
+        {/* State D: Data foto berhasil dimuat */}
         {!loadingPhotos && !error && photos.length > 0 && (
           <PhotoGrid photos={photos} />
         )}
       </main>
+
+      {/* Upload Modal */}
+      <UploadModal
+        isOpen={isModalOpen}
+        onClose={() => setIsModalOpen(false)}
+        onUploadSuccess={handleUploadSuccess}
+      />
     </div>
   );
 };

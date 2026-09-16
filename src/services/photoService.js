@@ -264,10 +264,19 @@ export const MAX_MULTIPLE_PHOTOS = 10;
  * sebelum proses upload dimulai, serta menyediakan pelaporan progress (Task 3.8 + 3.9).
  *
  * @param {FileList|Array<File>} files - Koleksi file foto yang akan diunggah.
- * @param {Function} [onProgress] - Callback progress ({ completed, total, percent, currentFile }).
+ * @param {object|Function} [options={}] - Opsi upload atau callback onProgress langsung.
+ * @param {Function} [options.onProgress] - Callback progress ({ completed, total, percent, currentFile }).
+ * @param {string} [options.title] - Judul foto (digunakan untuk semua foto dalam batch ini).
+ * @param {string} [options.description=""] - Deskripsi foto opsional.
  * @returns {Promise<Array<object>>} - Array berisi hasil upload masing-masing foto.
  */
-export const uploadMultiplePhotos = async (files, onProgress) => {
+export const uploadMultiplePhotos = async (files, options = {}) => {
+  // Dukung backward-compat: jika options berupa fungsi, anggap sebagai onProgress
+  const { onProgress, title, description } =
+    typeof options === "function"
+      ? { onProgress: options, title: undefined, description: undefined }
+      : options;
+
   // 1. Cek input ada atau tidak (null, undefined, atau bukan koleksi)
   if (!files) {
     throw new Error("Foto belum dipilih.");
@@ -332,7 +341,7 @@ export const uploadMultiplePhotos = async (files, onProgress) => {
   const results = [];
   for (let i = 0; i < fileList.length; i++) {
     const file = fileList[i];
-    const uploadResult = await uploadOnePhoto(file);
+    const uploadResult = await uploadOnePhoto(file, { title, description });
     results.push(uploadResult);
 
     if (typeof onProgress === "function") {
@@ -349,4 +358,5 @@ export const uploadMultiplePhotos = async (files, onProgress) => {
 
   return results;
 };
+
 
